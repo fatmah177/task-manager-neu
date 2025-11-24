@@ -1,6 +1,8 @@
 from flask import Flask, jsonify, request
 from models import db, User, Task, Category
 
+ALLOWED_STATUSES = ["To Do", "In Progress", "Done"]
+
 app = Flask(__name__)
 
 # Datenbank Konfiguration
@@ -8,6 +10,8 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///tasks.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
+
+ALLOWED_STATUSES = ["To Do", "In Progress", "Done"]
 
 
 @app.route("/")
@@ -50,27 +54,35 @@ def get_user_tasks(user_id):
 # TASK ROUTEN
 # =======================
 
+# ✔ Alle Tasks abrufen
 @app.route("/tasks", methods=["GET"])
 def get_tasks():
     tasks = Task.query.all()
     return jsonify([t.to_dict() for t in tasks])
 
 
+# ✔ Neuen Task erstellen
 @app.route("/tasks", methods=["POST"])
 def create_task():
     data = request.get_json()
+
+    status = data.get("status", "To Do")
+    if status not in ALLOWED_STATUSES:
+        return jsonify({"error": "Invalid status"}), 400
+
     task = Task(
         title=data["title"],
         description=data.get("description", ""),
-        status=data.get("status", "To Do"),
+        status=status,
         user_id=data["user_id"],
-        category_id=data.get("category_id")  # NEU: Kategorie optional
+        category_id=data.get("category_id")  # optional
     )
     db.session.add(task)
     db.session.commit()
     return jsonify(task.to_dict()), 201
 
 
+# ✔ Task bearbeiten (Titel, Beschreibung, Status, Kategorie)
 @app.route("/tasks/<int:task_id>", methods=["PUT"])
 def update_task(task_id):
     task = Task.query.get_or_404(task_id)
@@ -78,13 +90,38 @@ def update_task(task_id):
 
     task.title = data.get("title", task.title)
     task.description = data.get("description", task.description)
-    task.status = data.get("status", task.status)
-    task.category_id = data.get("category_id", task.category_id)
+
+    # → Status ändern nur wenn vorhanden
+    if "status" in data:
+        new_status = data["status"]
+        if new_status not in ALLOWED_STATUSES:
+            return jsonify({"error": "Invalid status"}), 400
+        task.status = new_status
+
+    # → Kategorie optional ändern
+    if "category_id" in data:
+        task.category_id = data["category_id"]
 
     db.session.commit()
     return jsonify(task.to_dict())
 
 
+# ⭐ NEU: Task verschieben (für Kanban: To Do → In Progress → Done)
+@app.route("/tasks/<int:task_id>/move", methods=["PUT"])
+def move_task(task_id):
+    task = Task.query.get_or_404(task_id)
+    data = request.get_json() or {}
+
+    new_status = data.get("status")
+    if new_status not in ALLOWED_STATUSES:
+        return jsonify({"error": "Invalid status"}), 400
+
+    task.status = new_status
+    db.session.commit()
+    return jsonify(task.to_dict()), 200
+
+
+# ✔ Task löschen
 @app.route("/tasks/<int:task_id>", methods=["DELETE"])
 def delete_task(task_id):
     task = Task.query.get_or_404(task_id)
@@ -162,6 +199,30 @@ def get_tasks_by_category(category_id):
     tasks = Task.query.filter_by(category_id=category_id).all()
     return jsonify([t.to_dict() for t in tasks]), 200
 
+# =======================
+# Board
+# =======================
+@app.route("/board", methods=["GET"])
+def get_board():
+    tasks = Task.query.all()
+
+    # Nach Status sortieren
+    columns = {
+        "To Do": [],
+        "In Progress": [],
+        "Done": []
+    }
+
+    for t in tasks:
+        status = t.status if t.status in columns else "To Do"
+        columns[status].append(t.to_dict())
+
+    # Frontend-freundliche Keys
+    return jsonify({
+        "todo": columns["To Do"],
+        "in_progress": columns["In Progress"],
+        "done": columns["Done"]
+    }), 200
 
 # =======================
 # Datenbank erstellen und App starten
