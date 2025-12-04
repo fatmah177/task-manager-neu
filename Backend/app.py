@@ -3,7 +3,8 @@ from models import db, User, Task, Category
 from sqlalchemy import case
 from datetime import datetime,timedelta
 from flask_cors import CORS
-#F#sdjf
+from flask_cors import CORS
+
 
 ALLOWED_STATUSES = ["To Do", "In Progress", "Done"]
 ALLOWED_PRIORITIES = ["low", "medium", "high"]
